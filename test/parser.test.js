@@ -1,27 +1,33 @@
 /**
  * test/parser.test.js
- * Unit tests for the Markdown parser pipeline.
+ * Unit tests for src/parser.js
  */
 
 import { describe, it, expect } from 'vitest';
 import {
   parseMarkdown,
-  extractCodeBlocks,
-  restoreCodeBlocks,
   escapeHtml,
-  transformHeadings,
-  transformBold,
-  transformItalic,
-  transformInlineCode,
-  transformLinks,
-  transformParagraphs,
+  extractCodeBlocks,
+  processBlockElements,
+  processInlineCode,
+  processBold,
+  processItalic,
+  processLinks,
 } from '../src/parser.js';
 
 describe('escapeHtml', () => {
-  it('escapes & < > " \' characters', () => {
-    expect(escapeHtml('a & b < c > d " e \'')).toBe('a &amp; b &lt; c &gt; d &quot; e &#39;');
+  it('escapes ampersands', () => {
+    expect(escapeHtml('a & b')).toBe('a &amp; b');
   });
-
+  it('escapes less-than', () => {
+    expect(escapeHtml('<div>')).toBe('&lt;div&gt;');
+  });
+  it('escapes double quotes', () => {
+    expect(escapeHtml('"hello"')).toBe('&quot;hello&quot;');
+  });
+  it('escapes single quotes', () => {
+    expect(escapeHtml("it's")).toBe('it&#39;s');
+  });
   it('returns unchanged string when no special chars', () => {
     expect(escapeHtml('hello world')).toBe('hello world');
   });
@@ -29,215 +35,176 @@ describe('escapeHtml', () => {
 
 describe('extractCodeBlocks', () => {
   it('extracts a plain fenced code block', () => {
-    const input = '```\nconsole.log("hi")\n```';
+    const input = '```\nconsole.log("hi");\n```';
     const { text, blocks } = extractCodeBlocks(input);
     expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toBe('<pre><code>console.log(&quot;hi&quot;)</code></pre>');
-    expect(text).toContain('\x00CODE_BLOCK_0\x00');
+    expect(blocks[0]).toContain('<pre><code>');
+    expect(blocks[0]).toContain('console.log');
+    expect(text).not.toContain('console.log');
   });
 
-  it('extracts a language-tagged fenced code block', () => {
-    const input = '```js\nconst x = 1;\n```';
+  it('extracts a fenced code block with language tag', () => {
+    const input = '```javascript\nconst x = 1;\n```';
     const { text, blocks } = extractCodeBlocks(input);
-    expect(blocks[0]).toBe('<pre><code class="language-js">const x = 1;</code></pre>');
-  });
-
-  it('extracts multiple code blocks', () => {
-    const input = '```\nfirst\n```\n\n```\nsecond\n```';
-    const { text, blocks } = extractCodeBlocks(input);
-    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toContain('class="language-javascript"');
   });
 
   it('escapes HTML inside code blocks', () => {
-    const input = '```\n<div>&</div>\n```';
+    const input = '```\n<script>alert(1)</script>\n```';
     const { blocks } = extractCodeBlocks(input);
-    expect(blocks[0]).toContain('&lt;div&gt;&amp;&lt;/div&gt;');
+    expect(blocks[0]).toContain('&lt;script&gt;');
+    expect(blocks[0]).not.toContain('<script>');
+  });
+
+  it('handles multiple code blocks', () => {
+    const input = '```\nblock one\n```\n\n```\nblock two\n```';
+    const { blocks } = extractCodeBlocks(input);
+    expect(blocks).toHaveLength(2);
+  });
+
+  it('returns unchanged text when no code blocks present', () => {
+    const input = 'Hello world';
+    const { text, blocks } = extractCodeBlocks(input);
+    expect(blocks).toHaveLength(0);
+    expect(text).toBe('Hello world');
   });
 });
 
-describe('restoreCodeBlocks', () => {
-  it('restores placeholders with block HTML', () => {
-    const blocks = ['<pre><code>hello</code></pre>'];
-    const text = 'before\n\x00CODE_BLOCK_0\x00\nafter';
-    expect(restoreCodeBlocks(text, blocks)).toContain('<pre><code>hello</code></pre>');
-  });
-});
-
-describe('transformHeadings', () => {
-  it('converts # to <h1>', () => {
-    expect(transformHeadings('# Hello')).toBe('<h1>Hello</h1>');
-  });
-
-  it('converts ## to <h2>', () => {
-    expect(transformHeadings('## World')).toBe('<h2>World</h2>');
-  });
-
-  it('converts ###### to <h6>', () => {
-    expect(transformHeadings('###### Deep')).toBe('<h6>Deep</h6>');
-  });
-
-  it('does not convert lines with no space after #', () => {
-    const result = transformHeadings('#NoSpace');
-    expect(result).toBe('#NoSpace');
-  });
-
-  it('trims trailing hashes and spaces', () => {
-    expect(transformHeadings('# Title   ')).toBe('<h1>Title</h1>');
-  });
-
-  it('handles multiple headings', () => {
-    const input = '# One\n## Two\n### Three';
-    const result = transformHeadings(input);
-    expect(result).toContain('<h1>One</h1>');
-    expect(result).toContain('<h2>Two</h2>');
-    expect(result).toContain('<h3>Three</h3>');
-  });
-});
-
-describe('transformBold', () => {
-  it('converts **text** to <strong>', () => {
-    expect(transformBold('**bold**')).toBe('<strong>bold</strong>');
-  });
-
-  it('converts __text__ to <strong>', () => {
-    expect(transformBold('__bold__')).toBe('<strong>bold</strong>');
-  });
-
-  it('handles multiple bold spans', () => {
-    const result = transformBold('**a** and **b**');
-    expect(result).toBe('<strong>a</strong> and <strong>b</strong>');
-  });
-
-  it('leaves non-bold text unchanged', () => {
-    expect(transformBold('normal text')).toBe('normal text');
-  });
-});
-
-describe('transformItalic', () => {
-  it('converts *text* to <em>', () => {
-    expect(transformItalic('*italic*')).toBe('<em>italic</em>');
-  });
-
-  it('converts _text_ to <em>', () => {
-    expect(transformItalic('_italic_')).toBe('<em>italic</em>');
-  });
-
-  it('handles multiple italic spans', () => {
-    const result = transformItalic('*a* and *b*');
-    expect(result).toBe('<em>a</em> and <em>b</em>');
-  });
-
-  it('leaves non-italic text unchanged', () => {
-    expect(transformItalic('normal text')).toBe('normal text');
-  });
-});
-
-describe('transformInlineCode', () => {
-  it('converts `code` to <code>', () => {
-    expect(transformInlineCode('`hello`')).toBe('<code>hello</code>');
-  });
-
-  it('escapes HTML inside inline code', () => {
-    expect(transformInlineCode('`<div>`')).toBe('<code>&lt;div&gt;</code>');
-  });
-
-  it('handles multiple inline code spans', () => {
-    const result = transformInlineCode('`a` and `b`');
-    expect(result).toBe('<code>a</code> and <code>b</code>');
-  });
-});
-
-describe('transformLinks', () => {
-  it('converts [text](url) to <a>', () => {
-    expect(transformLinks('[Google](https://google.com)')).toBe('<a href="https://google.com">Google</a>');
-  });
-
-  it('handles multiple links', () => {
-    const result = transformLinks('[A](http://a.com) and [B](http://b.com)');
-    expect(result).toContain('<a href="http://a.com">A</a>');
-    expect(result).toContain('<a href="http://b.com">B</a>');
-  });
-
-  it('leaves non-link text unchanged', () => {
-    expect(transformLinks('no links here')).toBe('no links here');
-  });
-});
-
-describe('transformParagraphs', () => {
-  it('wraps plain text in <p>', () => {
-    expect(transformParagraphs('Hello world')).toBe('<p>Hello world</p>');
-  });
-
-  it('does not wrap block-level elements in <p>', () => {
-    const result = transformParagraphs('<h1>Title</h1>');
-    expect(result).toBe('<h1>Title</h1>');
-  });
-
-  it('wraps multiple paragraphs separated by blank lines', () => {
-    const result = transformParagraphs('First\n\nSecond');
-    expect(result).toContain('<p>First</p>');
-    expect(result).toContain('<p>Second</p>');
-  });
-});
-
-describe('parseMarkdown (integration)', () => {
-  it('converts a heading', () => {
+describe('Headings', () => {
+  it('converts h1', () => {
     expect(parseMarkdown('# Hello')).toContain('<h1>Hello</h1>');
   });
-
-  it('converts bold text', () => {
-    expect(parseMarkdown('**bold**')).toContain('<strong>bold</strong>');
+  it('converts h2', () => {
+    expect(parseMarkdown('## Hello')).toContain('<h2>Hello</h2>');
   });
-
-  it('converts italic text', () => {
-    expect(parseMarkdown('*italic*')).toContain('<em>italic</em>');
+  it('converts h3', () => {
+    expect(parseMarkdown('### Hello')).toContain('<h3>Hello</h3>');
   });
-
-  it('converts inline code', () => {
-    expect(parseMarkdown('`code`')).toContain('<code>code</code>');
+  it('converts h4', () => {
+    expect(parseMarkdown('#### Hello')).toContain('<h4>Hello</h4>');
   });
-
-  it('converts a link', () => {
-    expect(parseMarkdown('[Link](http://example.com)')).toContain('<a href="http://example.com">Link</a>');
+  it('converts h5', () => {
+    expect(parseMarkdown('##### Hello')).toContain('<h5>Hello</h5>');
   });
+  it('converts h6', () => {
+    expect(parseMarkdown('###### Hello')).toContain('<h6>Hello</h6>');
+  });
+  it('does not convert 7+ hashes as heading', () => {
+    const result = parseMarkdown('####### Not a heading');
+    expect(result).not.toContain('<h7>');
+  });
+  it('requires space after hashes', () => {
+    const result = parseMarkdown('#NoSpace');
+    expect(result).not.toContain('<h1>');
+  });
+});
 
-  it('converts a fenced code block', () => {
+describe('Bold', () => {
+  it('converts **bold**', () => {
+    expect(parseMarkdown('**bold text**')).toContain('<strong>bold text</strong>');
+  });
+  it('converts __bold__', () => {
+    expect(parseMarkdown('__bold text__')).toContain('<strong>bold text</strong>');
+  });
+  it('handles bold within a sentence', () => {
+    const result = parseMarkdown('This is **important** stuff.');
+    expect(result).toContain('<strong>important</strong>');
+  });
+});
+
+describe('Italic', () => {
+  it('converts *italic*', () => {
+    expect(parseMarkdown('*italic text*')).toContain('<em>italic text</em>');
+  });
+  it('converts _italic_', () => {
+    expect(parseMarkdown('_italic text_')).toContain('<em>italic text</em>');
+  });
+  it('handles italic within a sentence', () => {
+    const result = parseMarkdown('This is *emphasized* text.');
+    expect(result).toContain('<em>emphasized</em>');
+  });
+});
+
+describe('Inline code', () => {
+  it('converts `code`', () => {
+    expect(parseMarkdown('Use `console.log()` here.')).toContain('<code>console.log()</code>');
+  });
+  it('escapes HTML inside inline code', () => {
+    const result = parseMarkdown('Use `<div>` element.');
+    expect(result).toContain('<code>&lt;div&gt;</code>');
+  });
+});
+
+describe('Links', () => {
+  it('converts [text](url)', () => {
+    const result = parseMarkdown('[Google](https://google.com)');
+    expect(result).toContain('<a href="https://google.com">Google</a>');
+  });
+  it('escapes special chars in URL', () => {
+    const result = parseMarkdown('[Link](https://example.com?a=1&b=2)');
+    expect(result).toContain('href="https://example.com?a=1&amp;b=2"');
+  });
+});
+
+describe('Fenced code blocks', () => {
+  it('wraps in <pre><code>', () => {
+    const result = parseMarkdown('```\nhello\n```');
+    expect(result).toContain('<pre><code>');
+    expect(result).toContain('hello');
+  });
+  it('adds language class when specified', () => {
     const result = parseMarkdown('```js\nconst x = 1;\n```');
-    expect(result).toContain('<pre><code class="language-js">const x = 1;</code></pre>');
+    expect(result).toContain('class="language-js"');
   });
-
-  it('does not apply inline transforms inside code blocks', () => {
+  it('does not process markdown inside code blocks', () => {
     const result = parseMarkdown('```\n**not bold**\n```');
     expect(result).not.toContain('<strong>');
     expect(result).toContain('**not bold**');
   });
+  it('escapes HTML inside code blocks', () => {
+    const result = parseMarkdown('```\n<b>test</b>\n```');
+    expect(result).toContain('&lt;b&gt;');
+    expect(result).not.toContain('<b>');
+  });
+});
 
-  it('handles a full document', () => {
-    const md = [
-      '# Title',
-      '',
-      'This is **bold** and *italic* text.',
-      '',
-      'Visit [Example](https://example.com) for more.',
-      '',
-      '```js',
-      'const x = 42;',
-      '```',
-      '',
-      'Inline `code` here.',
-    ].join('\n');
+describe('Paragraphs', () => {
+  it('wraps plain text in <p>', () => {
+    const result = parseMarkdown('Hello world');
+    expect(result).toContain('<p>Hello world</p>');
+  });
+  it('handles multiple paragraphs separated by blank line', () => {
+    const result = parseMarkdown('First para\n\nSecond para');
+    expect(result).toContain('<p>First para</p>');
+    expect(result).toContain('<p>Second para</p>');
+  });
+});
 
+describe('Combined elements', () => {
+  it('handles heading + paragraph + bold', () => {
+    const md = '# Title\n\nThis is **bold** text.';
     const result = parseMarkdown(md);
     expect(result).toContain('<h1>Title</h1>');
     expect(result).toContain('<strong>bold</strong>');
-    expect(result).toContain('<em>italic</em>');
-    expect(result).toContain('<a href="https://example.com">Example</a>');
-    expect(result).toContain('<pre><code class="language-js">');
-    expect(result).toContain('<code>code</code>');
   });
 
-  it('normalizes Windows line endings', () => {
-    const result = parseMarkdown('# Title\r\n\r\nParagraph');
-    expect(result).toContain('<h1>Title</h1>');
+  it('handles link with italic text', () => {
+    const md = '[*click here*](https://example.com)';
+    const result = parseMarkdown(md);
+    expect(result).toContain('href="https://example.com"');
+  });
+
+  it('does not corrupt code block content with other transforms', () => {
+    const md = '# Heading\n\n```\n**not bold** _not italic_\n```\n\nNormal *italic* text.';
+    const result = parseMarkdown(md);
+    expect(result).toContain('<h1>Heading</h1>');
+    expect(result).toContain('**not bold** _not italic_');
+    expect(result).toContain('<em>italic</em>');
+    expect(result).not.toContain('<strong>not bold</strong>');
+  });
+
+  it('throws TypeError for non-string input', () => {
+    expect(() => parseMarkdown(null)).toThrow(TypeError);
+    expect(() => parseMarkdown(42)).toThrow(TypeError);
   });
 });

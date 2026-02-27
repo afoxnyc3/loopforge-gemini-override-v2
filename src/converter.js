@@ -1,21 +1,20 @@
 /**
  * src/converter.js
- * Orchestrates the Markdown-to-HTML conversion pipeline.
- * Reads input, parses Markdown, wraps in HTML boilerplate, writes output.
+ * Orchestrates the Markdown→HTML conversion pipeline.
+ * Wires together parser.js and fileHandler.js.
  */
 
-import { readFile, writeFile, deriveOutputPath } from './fileHandler.js';
 import { parseMarkdown } from './parser.js';
-import { basename } from 'node:path';
+import { readFile, writeFile, deriveOutputPath } from './fileHandler.js';
+import { basename } from 'path';
 
 /**
- * Wraps an HTML fragment in a minimal, valid HTML5 document.
- *
- * @param {string} title - Page title (derived from filename)
- * @param {string} body - HTML fragment for the body
- * @returns {string} - Full HTML document string
+ * Wraps an HTML fragment in a minimal valid HTML5 document.
+ * @param {string} fragment — inner HTML content
+ * @param {string} title — document title (derived from filename)
+ * @returns {string} full HTML document string
  */
-function wrapHtml(title, body) {
+export function wrapHtmlDocument(fragment, title) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -24,40 +23,37 @@ function wrapHtml(title, body) {
   <title>${title}</title>
 </head>
 <body>
-${body}
+${fragment}
 </body>
 </html>
 `;
 }
 
 /**
- * Converts a Markdown file to an HTML file.
- *
- * @param {string} inputPath - Path to the source .md file
- * @param {string} [outputPath] - Optional explicit output path.
- *   If omitted, derived from inputPath (same dir, .html extension).
- * @param {string} [outputDir] - Optional output directory (used only if outputPath is not given).
+ * Converts a Markdown file to HTML and writes the output.
+ * @param {string} inputPath — path to the .md source file
+ * @param {string} [outputPath] — optional explicit output path;
+ *   if omitted, derived via deriveOutputPath(inputPath)
  * @returns {Promise<{ inputPath: string, outputPath: string }>}
+ * @throws {Error} if read, parse, or write fails
  */
-export async function convert(inputPath, outputPath, outputDir) {
-  // Resolve output path
-  const resolvedOutputPath = outputPath || deriveOutputPath(inputPath, outputDir);
+export async function convert(inputPath, outputPath) {
+  const resolvedOutput = outputPath ?? deriveOutputPath(inputPath);
 
-  // Read Markdown source
+  // Read source
   const markdown = await readFile(inputPath);
 
   // Parse to HTML fragment
-  const htmlFragment = parseMarkdown(markdown);
+  const fragment = parseMarkdown(markdown);
 
-  // Derive page title from filename (strip extension)
-  const fileBase = basename(inputPath);
-  const title = fileBase.replace(/\.md$/i, '');
+  // Derive title from filename (strip extension)
+  const title = basename(inputPath).replace(/\.md$/i, '');
 
   // Wrap in full HTML document
-  const fullHtml = wrapHtml(title, htmlFragment);
+  const html = wrapHtmlDocument(fragment, title);
 
   // Write output
-  await writeFile(resolvedOutputPath, fullHtml);
+  await writeFile(resolvedOutput, html);
 
-  return { inputPath, outputPath: resolvedOutputPath };
+  return { inputPath, outputPath: resolvedOutput };
 }

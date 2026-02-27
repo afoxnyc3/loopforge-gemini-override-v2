@@ -1,16 +1,16 @@
-# gemini-override-v2
+# md2html
 
 A minimal CLI tool that converts Markdown files to HTML.
 
 ## Features
 
-- Headings (`#` through `######`)
-- **Bold** (`**text**` and `__text__`)
-- *Italic* (`*text*` and `_text_`)
+- Headings (h1–h6)
+- Bold (`**text**` and `__text__`)
+- Italic (`*text*` and `_text_`)
 - Inline code (`` `code` ``)
-- Fenced code blocks (`` ``` `` with optional language)
+- Fenced code blocks (with optional language tag)
 - Links (`[text](url)`)
-- `--watch` flag for auto-recompile on file changes
+- `--watch` mode for auto-recompile on file changes
 
 ## Installation
 
@@ -22,20 +22,16 @@ npm link   # makes md2html available globally
 ## Usage
 
 ```bash
-# Basic conversion
+# Convert a file
 md2html input.md
 
 # Specify output path
-md2html input.md output.html
+md2html input.md -o output.html
 
 # Watch mode
 md2html input.md --watch
-md2html input.md output.html -w
 
-# Help
-md2html --help
-
-# Version
+# Show version
 md2html --version
 ```
 
@@ -47,25 +43,8 @@ npm test
 
 # Run tests in watch mode
 npm run test:watch
-
-# Run tests with coverage
-npm run test:coverage
 ```
 
-## Architecture
+## Requirements
 
-See [docs/architecture.md](docs/architecture.md) for full architecture documentation.
-
-### Module Structure
-
-```
-bin/md2html.js     — CLI entry point (commander)
-src/parser.js      — Markdown-to-HTML parser (regex pipeline)
-src/fileHandler.js — File I/O utilities
-src/converter.js   — Orchestrator (parser + fileHandler)
-src/watcher.js     — File watcher (chokidar)
-```
-
-## License
-
-MIT
+- Node.js >= 18.0.0

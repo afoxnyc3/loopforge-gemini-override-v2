@@ -1,19 +1,20 @@
 /**
  * src/watcher.js
  * Wraps chokidar to watch a file for changes.
- * Debounces rapid changes (100ms) and logs events to stderr.
+ * Debounces rapid changes with a 100ms window.
+ * Logs events to stderr.
  */
 
 import chokidar from 'chokidar';
 
+const DEBOUNCE_MS = 100;
+
 /**
- * Watches a file for changes and calls onChange when the file is modified.
- * Debounces rapid changes with a 100ms window.
- * Logs watch events to stderr.
+ * Watches a file for changes and calls onChange on each debounced change event.
  *
- * @param {string} filePath - Path to the file to watch
- * @param {(filePath: string) => void} onChange - Callback invoked on file change
- * @returns {{ close: () => Promise<void> }} - Handle to stop watching
+ * @param {string} filePath — path to the file to watch
+ * @param {(filePath: string) => void | Promise<void>} onChange — callback invoked on change
+ * @returns {{ close: () => Promise<void> }} handle with a close() method
  */
 export function watch(filePath, onChange) {
   let debounceTimer = null;
@@ -27,30 +28,33 @@ export function watch(filePath, onChange) {
     },
   });
 
-  watcher.on('ready', () => {
-    process.stderr.write(`[md2html] Watching for changes: ${filePath}\n`);
-  });
-
-  watcher.on('change', (changedPath) => {
-    process.stderr.write(`[md2html] Change detected: ${changedPath}\n`);
-
+  const handleChange = (changedPath) => {
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
-
-    debounceTimer = setTimeout(() => {
+    debounceTimer = setTimeout(async () => {
       debounceTimer = null;
-      onChange(changedPath);
-    }, 100);
-  });
+      process.stderr.write(`[md2html] File changed: ${changedPath}\n`);
+      try {
+        await onChange(changedPath);
+      } catch (err) {
+        process.stderr.write(`[md2html] Error processing change: ${err.message}\n`);
+      }
+    }, DEBOUNCE_MS);
+  };
 
-  watcher.on('error', (err) => {
-    process.stderr.write(`[md2html] Watcher error: ${err.message}\n`);
-  });
+  watcher
+    .on('change', handleChange)
+    .on('add', handleChange)
+    .on('error', (err) => {
+      process.stderr.write(`[md2html] Watcher error: ${err.message}\n`);
+    });
+
+  process.stderr.write(`[md2html] Watching: ${filePath}\n`);
 
   return {
     /**
-     * Stops the file watcher and cleans up resources.
+     * Stops the file watcher.
      * @returns {Promise<void>}
      */
     close: async () => {

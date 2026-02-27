@@ -1,12 +1,14 @@
 /**
  * test/converter.test.js
- * Integration tests for the converter orchestrator.
+ * Integration tests for src/converter.js
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile as fsWrite, readFile as fsRead } from 'node:fs/promises';
-import { join, tmpdir } from 'node:path';
-import { convert } from '../src/converter.js';
+import { convert, wrapHtmlDocument } from '../src/converter.js';
+import { readFile } from '../src/fileHandler.js';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 let tmpDir;
 
@@ -18,88 +20,70 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-describe('convert', () => {
-  it('converts a simple Markdown file to HTML', async () => {
-    const inputPath = join(tmpDir, 'test.md');
-    await fsWrite(inputPath, '# Hello World', 'utf-8');
-
-    const result = await convert(inputPath);
-
-    expect(result.inputPath).toBe(inputPath);
-    expect(result.outputPath).toMatch(/test\.html$/);
-
-    const html = await fsRead(result.outputPath, 'utf-8');
+describe('wrapHtmlDocument', () => {
+  it('produces a valid HTML5 document', () => {
+    const html = wrapHtmlDocument('<h1>Hello</h1>', 'Test');
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<h1>Hello World</h1>');
-    expect(html).toContain('<title>test</title>');
+    expect(html).toContain('<title>Test</title>');
+    expect(html).toContain('<h1>Hello</h1>');
+    expect(html).toContain('</body>');
+    expect(html).toContain('</html>');
   });
 
-  it('writes to an explicit output path', async () => {
-    const inputPath = join(tmpDir, 'input.md');
-    const outputPath = join(tmpDir, 'custom-output.html');
-    await fsWrite(inputPath, '## Subtitle', 'utf-8');
+  it('includes charset meta tag', () => {
+    const html = wrapHtmlDocument('', 'Empty');
+    expect(html).toContain('charset="UTF-8"');
+  });
+});
+
+describe('convert', () => {
+  it('converts a markdown file and writes HTML output', async () => {
+    const inputPath = join(tmpDir, 'test.md');
+    const outputPath = join(tmpDir, 'test.html');
+    await writeFile(inputPath, '# Hello World\n\nThis is **bold**.');
 
     const result = await convert(inputPath, outputPath);
 
     expect(result.outputPath).toBe(outputPath);
-    const html = await fsRead(outputPath, 'utf-8');
-    expect(html).toContain('<h2>Subtitle</h2>');
+    const html = await readFile(outputPath);
+    expect(html).toContain('<h1>Hello World</h1>');
+    expect(html).toContain('<strong>bold</strong>');
+    expect(html).toContain('<!DOCTYPE html>');
   });
 
-  it('creates output directory if it does not exist', async () => {
-    const inputPath = join(tmpDir, 'input.md');
-    const outputPath = join(tmpDir, 'nested', 'dir', 'output.html');
-    await fsWrite(inputPath, 'Plain text', 'utf-8');
+  it('derives output path when not specified', async () => {
+    const inputPath = join(tmpDir, 'readme.md');
+    await writeFile(inputPath, '# README');
+
+    const result = await convert(inputPath);
+
+    expect(result.outputPath).toMatch(/readme\.html$/);
+    const html = await readFile(result.outputPath);
+    expect(html).toContain('<h1>README</h1>');
+  });
+
+  it('sets document title from filename', async () => {
+    const inputPath = join(tmpDir, 'my-doc.md');
+    await writeFile(inputPath, '# Content');
+
+    await convert(inputPath, join(tmpDir, 'my-doc.html'));
+    const html = await readFile(join(tmpDir, 'my-doc.html'));
+    expect(html).toContain('<title>my-doc</title>');
+  });
+
+  it('throws if input file does not exist', async () => {
+    await expect(
+      convert(join(tmpDir, 'nonexistent.md'), join(tmpDir, 'out.html'))
+    ).rejects.toThrow('File not found');
+  });
+
+  it('handles empty markdown file', async () => {
+    const inputPath = join(tmpDir, 'empty.md');
+    const outputPath = join(tmpDir, 'empty.html');
+    await writeFile(inputPath, '');
 
     await convert(inputPath, outputPath);
-
-    const html = await fsRead(outputPath, 'utf-8');
-    expect(html).toContain('<p>Plain text</p>');
-  });
-
-  it('produces a valid HTML5 document structure', async () => {
-    const inputPath = join(tmpDir, 'doc.md');
-    await fsWrite(inputPath, '# Title\n\nParagraph text.', 'utf-8');
-
-    const result = await convert(inputPath);
-    const html = await fsRead(result.outputPath, 'utf-8');
-
+    const html = await readFile(outputPath);
     expect(html).toContain('<!DOCTYPE html>');
-    expect(html).toContain('<html lang="en">');
-    expect(html).toContain('<meta charset="UTF-8">');
-    expect(html).toContain('</html>');
-  });
-
-  it('throws a descriptive error for missing input file', async () => {
-    await expect(convert(join(tmpDir, 'nonexistent.md'))).rejects.toThrow('File not found');
-  });
-
-  it('handles a full-featured Markdown document', async () => {
-    const md = [
-      '# My Document',
-      '',
-      'This is **bold** and *italic*.',
-      '',
-      'Visit [Example](https://example.com).',
-      '',
-      '```js',
-      'const x = 42;',
-      '```',
-      '',
-      'Use `inline code` here.',
-    ].join('\n');
-
-    const inputPath = join(tmpDir, 'full.md');
-    await fsWrite(inputPath, md, 'utf-8');
-
-    const result = await convert(inputPath);
-    const html = await fsRead(result.outputPath, 'utf-8');
-
-    expect(html).toContain('<h1>My Document</h1>');
-    expect(html).toContain('<strong>bold</strong>');
-    expect(html).toContain('<em>italic</em>');
-    expect(html).toContain('<a href="https://example.com">Example</a>');
-    expect(html).toContain('<pre><code class="language-js">');
-    expect(html).toContain('<code>inline code</code>');
   });
 });

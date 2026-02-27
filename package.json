@@ -9,22 +9,18 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "start": "node bin/md2html.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {
-    "chokidar": "^3.5.3",
-    "commander": "^11.0.0"
-  },
-  "devDependencies": {
-    "vitest": "^1.0.0"
-  },
-  "files": [
-    "bin/",
-    "src/"
-  ],
   "keywords": ["markdown", "html", "converter", "cli"],
   "license": "MIT"
 }
