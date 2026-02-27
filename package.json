@@ -1,7 +1,7 @@
 {
   "name": "gemini-override-v2",
   "version": "1.0.0",
-  "description": "Minimal CLI tool that converts Markdown files to HTML",
+  "description": "A minimal CLI tool that converts Markdown files to HTML",
   "type": "module",
   "bin": {
     "md2html": "./bin/md2html.js"
@@ -9,30 +9,22 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "lint": "eslint src bin"
+    "test:coverage": "vitest run --coverage"
   },
-  "files": [
-    "bin",
-    "src",
-    "README.md"
-  ],
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "chokidar": "^3.6.0",
-    "commander": "^11.1.0"
+    "chokidar": "^3.5.3",
+    "commander": "^11.0.0"
   },
   "devDependencies": {
-    "vitest": "^1.6.0",
-    "@vitest/coverage-v8": "^1.6.0"
+    "vitest": "^1.0.0"
   },
-  "keywords": [
-    "markdown",
-    "html",
-    "converter",
-    "cli"
+  "files": [
+    "bin/",
+    "src/"
   ],
+  "keywords": ["markdown", "html", "converter", "cli"],
   "license": "MIT"
 }

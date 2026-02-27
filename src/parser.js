@@ -1,55 +1,49 @@
 /**
  * src/parser.js
- * Pure Markdown-to-HTML parser using a regex pipeline.
- * All exports are named. No side effects.
+ * Pure function Markdown-to-HTML parser using a regex pipeline.
+ * No external Markdown libraries — custom transforms only.
  */
-
-// Placeholder token used to protect fenced code blocks
-const CODE_BLOCK_PLACEHOLDER = '\x00CODE_BLOCK_\x00';
 
 /**
- * Extract fenced code blocks from markdown, replacing them with
- * placeholder tokens so subsequent transforms don't corrupt their content.
+ * Extracts fenced code blocks and replaces them with placeholders.
+ * Returns { text, blocks } where blocks is an array of HTML strings.
  *
- * @param {string} markdown
+ * @param {string} text
  * @returns {{ text: string, blocks: string[] }}
  */
-export function extractCodeBlocks(markdown) {
+function extractCodeBlocks(text) {
   const blocks = [];
-  const text = markdown.replace(
-    /```([\w]*)\n?([\s\S]*?)```/g,
-    (_match, lang, code) => {
-      const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : '';
-      const html = `<pre><code${langAttr}>${escapeHtml(code.replace(/\n$/, ''))}</code></pre>`;
-      blocks.push(html);
-      return `${CODE_BLOCK_PLACEHOLDER}${blocks.length - 1}\x00`;
+  const result = text.replace(
+    /^```([\w-]*)\n([\s\S]*?)^```/gm,
+    (_, lang, code) => {
+      const langAttr = lang ? ` class="language-${lang}"` : '';
+      const escaped = escapeHtml(code.replace(/\n$/, ''));
+      blocks.push(`<pre><code${langAttr}>${escaped}</code></pre>`);
+      return `\x00CODE_BLOCK_${blocks.length - 1}\x00`;
     }
   );
-  return { text, blocks };
+  return { text: result, blocks };
 }
 
 /**
- * Restore code block placeholders with their rendered HTML.
+ * Restores code block placeholders with their HTML equivalents.
  *
  * @param {string} text
  * @param {string[]} blocks
  * @returns {string}
  */
-export function restoreCodeBlocks(text, blocks) {
-  return text.replace(
-    new RegExp(`${CODE_BLOCK_PLACEHOLDER}(\\d+)\x00`, 'g'),
-    (_match, index) => blocks[parseInt(index, 10)]
-  );
+function restoreCodeBlocks(text, blocks) {
+  return text.replace(/\x00CODE_BLOCK_(\d+)\x00/g, (_, i) => blocks[Number(i)]);
 }
 
 /**
- * Escape HTML special characters to prevent XSS in code content.
+ * Escapes HTML special characters.
  *
- * @param {string} str
+ * @param {string} text
  * @returns {string}
  */
-export function escapeHtml(str) {
-  return str
+function escapeHtml(text) {
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -58,176 +52,143 @@ export function escapeHtml(str) {
 }
 
 /**
- * Process ATX-style headings (# through ######).
- * Must be applied to individual lines.
- *
- * @param {string} line
- * @returns {string}
- */
-export function parseHeading(line) {
-  const match = line.match(/^(#{1,6})\s+(.+)$/);
-  if (!match) return null;
-  const level = match[1].length;
-  const content = match[2].trim();
-  return `<h${level}>${parseInline(content)}</h${level}>`;
-}
-
-/**
- * Process inline bold: **text** and __text__
+ * Converts ATX headings (# through ######) to <h1>–<h6>.
  *
  * @param {string} text
  * @returns {string}
  */
-export function parseBold(text) {
+function transformHeadings(text) {
+  return text.replace(/^(#{1,6})[ \t]+(.+?)[ \t]*$/gm, (_, hashes, content) => {
+    const level = hashes.length;
+    return `<h${level}>${content.trim()}</h${level}>`;
+  });
+}
+
+/**
+ * Converts **text** and __text__ to <strong>.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function transformBold(text) {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>');
 }
 
 /**
- * Process inline italic: *text* and _text_
- * Applied after bold to avoid conflicts with ** vs *.
+ * Converts *text* and _text_ to <em>.
+ * Avoids matching bold markers.
  *
  * @param {string} text
  * @returns {string}
  */
-export function parseItalic(text) {
+function transformItalic(text) {
   return text
-    .replace(/\*(?!\*)(.+?)(?<!\*)\*/g, '<em>$1</em>')
-    .replace(/_(?!_)(.+?)(?<!_)_/g, '<em>$1</em>');
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+    .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, '<em>$1</em>');
 }
 
 /**
- * Process inline code: `code`
- * Applied before bold/italic to protect code spans.
+ * Converts `code` to <code>.
  *
  * @param {string} text
  * @returns {string}
  */
-export function parseInlineCode(text) {
-  return text.replace(/`([^`]+)`/g, (_match, code) => `<code>${escapeHtml(code)}</code>`);
+function transformInlineCode(text) {
+  return text.replace(/`([^`]+)`/g, (_, code) => `<code>${escapeHtml(code)}</code>`);
 }
 
 /**
- * Process inline links: [text](url)
- * Supports bold/italic inside link text.
+ * Converts [text](url) to <a href="url">text</a>.
  *
  * @param {string} text
  * @returns {string}
  */
-export function parseLinks(text) {
-  return text.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_match, linkText, url) => {
-      const processedText = parseBold(parseItalic(linkText));
-      return `<a href="${escapeHtml(url)}">${processedText}</a>`;
-    }
-  );
+function transformLinks(text) {
+  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 }
 
 /**
- * Apply all inline transforms in correct order:
- * inline code → links → bold → italic
- *
- * Inline code is first to protect backtick content.
- * Links before bold/italic so nested formatting inside link text works.
- * Bold before italic to handle *** correctly.
+ * Wraps non-empty lines that are not already block-level HTML elements in <p> tags.
+ * Blank lines separate paragraphs.
  *
  * @param {string} text
  * @returns {string}
  */
-export function parseInline(text) {
-  let result = text;
-  result = parseInlineCode(result);
-  result = parseLinks(result);
-  result = parseBold(result);
-  result = parseItalic(result);
-  return result;
-}
-
-/**
- * Process a block of lines that are not headings or code blocks.
- * Wraps non-empty content in <p> tags.
- *
- * @param {string[]} lines
- * @returns {string}
- */
-export function parseParagraph(lines) {
-  const content = lines.join(' ').trim();
-  if (!content) return '';
-  return `<p>${parseInline(content)}</p>`;
-}
-
-/**
- * Main parser entry point.
- * Converts a Markdown string to an HTML fragment (not a full document).
- *
- * Pipeline:
- * 1. Extract fenced code blocks (protect from other transforms)
- * 2. Split into lines
- * 3. Process block-level elements line by line (headings, blank lines)
- * 4. Accumulate paragraph lines and flush on blank/heading
- * 5. Apply inline transforms to paragraph content
- * 6. Restore code block placeholders
- *
- * @param {string} markdown
- * @returns {string} HTML fragment
- */
-export function parseMarkdown(markdown) {
-  if (typeof markdown !== 'string') {
-    throw new TypeError(`parseMarkdown expects a string, got ${typeof markdown}`);
-  }
-
-  // Step 1: Extract fenced code blocks
-  const { text: protectedText, blocks } = extractCodeBlocks(markdown);
-
-  // Step 2: Split into lines
-  const lines = protectedText.split('\n');
-
-  const outputParts = [];
+function transformParagraphs(text) {
+  const blockTags = /^(<h[1-6]|<pre|<ul|<ol|<li|<blockquote|<hr|<table|\x00CODE_BLOCK)/;
+  const lines = text.split('\n');
+  const output = [];
   let paragraphLines = [];
 
   const flushParagraph = () => {
     if (paragraphLines.length > 0) {
-      const para = parseParagraph(paragraphLines);
-      if (para) outputParts.push(para);
+      const content = paragraphLines.join(' ').trim();
+      if (content) {
+        output.push(`<p>${content}</p>`);
+      }
       paragraphLines = [];
     }
   };
 
   for (const line of lines) {
-    // Check if this line is a code block placeholder
-    const placeholderMatch = line.match(
-      new RegExp(`^${CODE_BLOCK_PLACEHOLDER}(\\d+)\x00$`)
-    );
-    if (placeholderMatch) {
-      flushParagraph();
-      outputParts.push(line); // will be restored later
-      continue;
-    }
-
-    // Blank line: flush paragraph
     if (line.trim() === '') {
       flushParagraph();
-      continue;
-    }
-
-    // Heading
-    const heading = parseHeading(line);
-    if (heading !== null) {
+    } else if (blockTags.test(line.trim())) {
       flushParagraph();
-      outputParts.push(heading);
-      continue;
+      output.push(line);
+    } else {
+      paragraphLines.push(line);
     }
-
-    // Regular text: accumulate for paragraph
-    paragraphLines.push(line);
   }
 
-  // Flush any remaining paragraph
   flushParagraph();
-
-  // Step 6: Restore code blocks
-  const joined = outputParts.join('\n');
-  return restoreCodeBlocks(joined, blocks);
+  return output.join('\n');
 }
+
+/**
+ * Main parser entry point.
+ * Runs the full Markdown-to-HTML pipeline on the input string.
+ *
+ * @param {string} markdown - Raw Markdown string
+ * @returns {string} - HTML string (fragment, no <html>/<body> wrapper)
+ */
+export function parseMarkdown(markdown) {
+  // Normalize line endings
+  let text = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // Step 1: Extract fenced code blocks (protect from further transforms)
+  const { text: textWithPlaceholders, blocks } = extractCodeBlocks(text);
+  text = textWithPlaceholders;
+
+  // Step 2: Transform headings
+  text = transformHeadings(text);
+
+  // Step 3: Transform inline elements (order matters: bold before italic)
+  text = transformBold(text);
+  text = transformItalic(text);
+  text = transformInlineCode(text);
+  text = transformLinks(text);
+
+  // Step 4: Wrap paragraphs
+  text = transformParagraphs(text);
+
+  // Step 5: Restore code blocks
+  text = restoreCodeBlocks(text, blocks);
+
+  return text;
+}
+
+// Named exports for testing individual transforms
+export {
+  extractCodeBlocks,
+  restoreCodeBlocks,
+  escapeHtml,
+  transformHeadings,
+  transformBold,
+  transformItalic,
+  transformInlineCode,
+  transformLinks,
+  transformParagraphs,
+};
